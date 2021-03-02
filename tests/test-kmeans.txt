@@ -1,0 +1,20 @@
+* Class 0
+ab bc mb mn qc sk 
+* Class 1
+ak dengl lb nt nu yt 
+* Class 2
+al fl ga ms nc sc 
+* Class 3
+ar ks ky la mo ok tn tx 
+* Class 4
+az ia nd ne sd 
+* Class 5
+ca co id mt nm nv or ut wa wy 
+* Class 6
+ct dc de il in ma md me mi nh nj ny oh on pa ri va vt wi wv 
+* Class 7
+fraspm nb nf ns 
+* Class 8
+hi 
+* Class 9
+pr vi 
