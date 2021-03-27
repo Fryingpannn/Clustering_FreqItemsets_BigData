@@ -52,8 +52,8 @@ def init_spark():
 
 def toCSVLineRDD(rdd):
     a = rdd.map(lambda row: ",".join([str(elt) for elt in row]))\
-           .reduce(lambda x,y: os.linesep.join([x,y]))
-    return a + os.linesep
+           .reduce(lambda x,y: "\n".join([x,y]))
+    return a + "\n"
 
 def toCSVLine(data):
     if isinstance(data, RDD):
@@ -96,7 +96,16 @@ def data_frame(filename, n):
     Test file: tests/test_data_frame.py
     '''
     spark = init_spark()
-    return "not implemented"
+
+    # read data from file
+    plants_df = spark.read.text(filename).na.drop()
+    # convert into rdd and split single string into list, first element is the plant
+    plants_rdd = plants_df.rdd.map(lambda row: row["value"].split(","))
+    # add index ((name, states, states, etc.), index)
+    plants_rdd = plants_rdd.map(list).zipWithIndex()
+    # re-order: (id, plant, [states]) ---> problem: states are in the plant column...
+    plants_rdd = plants_rdd.map(lambda row: Row(id=row[1], plant=row[0][0], items=[state for state in row[0][1:] if state]))
+    return toCSVLine(spark.sparkContext.parallelize(plants_rdd.take(n)))
 
 def frequent_itemsets(filename, n, s, c):
     '''
