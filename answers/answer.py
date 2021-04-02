@@ -10,7 +10,7 @@ from pyspark.sql import Row
 from pyspark.sql import DataFrame
 from pyspark.sql import SparkSession
 from pyspark.ml.fpm import FPGrowth
-from pyspark.sql.functions import desc, size, max, abs
+from pyspark.sql.functions import desc, size, max, abs, col
 
 '''
 INTRODUCTION
@@ -121,7 +121,30 @@ def frequent_itemsets(filename, n, s, c):
     Test: tests/test_frequent_items.py
     '''
     spark = init_spark()
-    return "not implemented"
+
+    # read data from file
+    plants_df = spark.read.text(filename).na.drop()
+    # convert into rdd and split single string into list, first element is the plant
+    plants_rdd = plants_df.rdd.map(lambda row: row["value"].split(","))
+    # add index ((name, states, states, etc.), index)
+    plants_rdd = plants_rdd.map(list).zipWithIndex()
+    # re-order: (id, plant, [states]) ---> problem: states are in the plant column...
+    plants_rdd = plants_rdd.map(
+        lambda row: Row(id=row[1], plant=row[0][0], items=[state for state in row[0][1:] if state]))
+
+    # convert to DF
+    plants_df = spark.createDataFrame(plants_rdd)
+    # create fp growth model
+    fpGrowth = FPGrowth(itemsCol="items", minConfidence=c, minSupport=s)
+    model = fpGrowth.fit(plants_df)
+    # get frequent itemsets
+    frequent_df = model.freqItemsets
+    # add a column indicating size of item list
+    frequent_df = frequent_df.withColumn('size', size(frequent_df.items))
+    # sort
+    frequent_df = frequent_df.orderBy(desc('size'), desc('freq'))
+
+    return toCSVLine(frequent_df.select('items', 'freq').limit(n))
 
 def association_rules(filename, n, s, c):
     '''
@@ -135,7 +158,30 @@ def association_rules(filename, n, s, c):
     Test: tests/test_association_rules.py
     '''
     spark = init_spark()
-    return " not implemented"
+
+    # read data from file
+    plants_df = spark.read.text(filename).na.drop()
+    # convert into rdd and split single string into list, first element is the plant
+    plants_rdd = plants_df.rdd.map(lambda row: row["value"].split(","))
+    # add index ((name, states, states, etc.), index)
+    plants_rdd = plants_rdd.map(list).zipWithIndex()
+    # re-order: (id, plant, [states]) ---> problem: states are in the plant column...
+    plants_rdd = plants_rdd.map(
+        lambda row: Row(id=row[1], plant=row[0][0], items=[state for state in row[0][1:] if state]))
+
+    # convert to DF
+    plants_df = spark.createDataFrame(plants_rdd)
+    # create fp growth model
+    fpGrowth = FPGrowth(itemsCol="items", minConfidence=c, minSupport=s)
+    model = fpGrowth.fit(plants_df)
+
+    # get association rules
+    rules = model.associationRules
+    # get/sortby size of antecedents
+    rules = rules.withColumn('size', size('antecedent'))
+    rules = rules.orderBy(desc('size'), desc('confidence')).select('antecedent', 'consequent', 'confidence')
+
+    return toCSVLine(rules.limit(n))
 
 def interests(filename, n, s, c):
     '''
@@ -150,7 +196,52 @@ def interests(filename, n, s, c):
     Test: tests/test_interests.py
     '''
     spark = init_spark()
-    return " not implemented"
+    # read data from file
+    plants_df = spark.read.text(filename)
+    # convert into rdd and split single string into list, first element is the plant
+    plants_rdd = plants_df.rdd.map(lambda row: row["value"].split(","))
+    # add index ((name, states, states, etc.), index)
+    plants_rdd = plants_rdd.map(list).zipWithIndex()
+    # re-order: (id, plant, [states])
+    plants_rdd = plants_rdd.map(lambda row: Row(id=row[1], plant=row[0][0], items=[state for state in row[0][1:] if state]))
+
+    # convert to DF
+    plants_df = spark.createDataFrame(plants_rdd)
+    # create fp growth model
+    fpGrowth = FPGrowth(itemsCol="items", minConfidence=c, minSupport=s)
+    model = fpGrowth.fit(plants_df)
+
+    # frequent itemsets
+    freq_items = model.freqItemsets
+
+    # get association rules
+    rules = model.associationRules
+
+    # compute interest: confidence - (count of consequent / total baskets)
+    # get total items
+    total_baskets = plants_rdd.count()
+
+    # frequent itemsets
+    freq_items = model.freqItemsets
+
+    # calculating interest
+    # getting the count of each consequent in all baskets.
+    consequent_counts = freq_items.join(rules.select('consequent'), col('consequent') == col('items')).select('freq', 'consequent')#.groupBy('consequent').count()
+    # join the counts onto association rule DF
+    rules = rules.join(consequent_counts, on='consequent')
+    # add a column representing the frequency
+    rules = rules.withColumn('freq(consequent)', col('freq') / total_baskets)
+    # add column representing interest
+    rules = rules.withColumn('interest', abs(col('confidence') - col('freq(consequent)')))
+    # final DF without sorting
+    rules = rules.select("antecedent", "consequent", "confidence", "consequent", "freq", "interest")
+
+    # sorting final DF by antecedent size then interest
+    sorted_rules = rules.withColumn('ant_size', size('antecedent')).distinct()
+    sorted_rules = sorted_rules.orderBy(desc('ant_size'), desc('interest'))
+    sorted_rules = sorted_rules.select("antecedent", "consequent", "confidence", "consequent", "freq", "interest")
+
+    return toCSVLine(sorted_rules.limit(n))
 
 '''
 PART 2: CLUSTERING
@@ -189,7 +280,22 @@ def data_preparation(filename, plant, state):
     Test: tests/test_data_preparation.py
     '''
     spark = init_spark()
-    return False
+    # read data from file
+    plants_df = spark.read.text(filename).na.drop()
+    # convert into rdd and split single string into list, first element is the plant
+    plants_rdd = plants_df.rdd.map(lambda row: row["value"].split(","))
+    # re-order: (id, plant, [states]) ---> problem: states are in the plant column...
+    plants_rdd = plants_rdd.map(lambda row: Row(plant=row[0], items=row[1:]))
+
+    # states & plants list
+    states_plants = plants_rdd.map(lambda row: (row['plant'], row['items'])).collect()
+
+    # use flat map to separate list returns into individual items. iterate list to create dictionary: (name of the state, {dictionary})
+    states_plants_final = plants_rdd.flatMap(lambda row: row[1]).distinct().map(lambda _state: (_state, {row[0]: (1 if _state in row[1] else 0) for row in states_plants}))
+    # filter the given state if it has the given plant
+    is_plant_in_state = states_plants_final.filter(lambda row: row[0] == state and row[1][plant] == 1)
+
+    return True if is_plant_in_state.count() > 0 else False
 
 def distance2(filename, state1, state2):
     '''
