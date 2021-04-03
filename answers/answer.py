@@ -4,6 +4,7 @@ import copy
 import time
 import random
 import pyspark
+import math
 from statistics import mean
 from pyspark.rdd import RDD
 from pyspark.sql import Row
@@ -261,6 +262,22 @@ provinces, Alaska and Hawaii couldn't be represented and a different
 seed than used in the tests was used). The classes seem to make sense 
 from a geographical point of view!
 '''
+def get_dict(plants_df):
+    '''
+    Get all the states and the plants they have.
+    Returns RDD of items as (name of the state, {dictionary})
+    '''
+    # convert into rdd and split single string into list, first element is the plant
+    plants_rdd = plants_df.rdd.map(lambda row: row["value"].split(","))
+    # re-order: (id, plant, [states]) ---> problem: states are in the plant column...
+    plants_rdd = plants_rdd.map(lambda row: Row(plant=row[0], items=row[1:]))
+
+    # states & plants list
+    states_plants = plants_rdd.map(lambda row: (row['plant'], row['items'])).collect()
+
+    # use flat map to separate list returns into individual items. iterate list to create dictionary: (name of the state, {dictionary})
+    states_plants_final = plants_rdd.flatMap(lambda row: row[1]).distinct().map(lambda _state: (_state, {row[0]: (1 if _state in row[1] else 0) for row in states_plants}))
+    return states_plants_final
 
 def data_preparation(filename, plant, state):
     '''
@@ -282,16 +299,7 @@ def data_preparation(filename, plant, state):
     spark = init_spark()
     # read data from file
     plants_df = spark.read.text(filename).na.drop()
-    # convert into rdd and split single string into list, first element is the plant
-    plants_rdd = plants_df.rdd.map(lambda row: row["value"].split(","))
-    # re-order: (id, plant, [states]) ---> problem: states are in the plant column...
-    plants_rdd = plants_rdd.map(lambda row: Row(plant=row[0], items=row[1:]))
-
-    # states & plants list
-    states_plants = plants_rdd.map(lambda row: (row['plant'], row['items'])).collect()
-
-    # use flat map to separate list returns into individual items. iterate list to create dictionary: (name of the state, {dictionary})
-    states_plants_final = plants_rdd.flatMap(lambda row: row[1]).distinct().map(lambda _state: (_state, {row[0]: (1 if _state in row[1] else 0) for row in states_plants}))
+    states_plants_final = get_dict(plants_df)
     # filter the given state if it has the given plant
     is_plant_in_state = states_plants_final.filter(lambda row: row[0] == state and row[1][plant] == 1)
 
@@ -305,7 +313,20 @@ def distance2(filename, state1, state2):
     Return value: an integer.
     Test: tests/test_distance.py
     '''
-    return 42
+    spark = init_spark()
+    # read data from file
+    plants_df = spark.read.text(filename).na.drop()
+    # get all the dictionaries for each state
+    states_plants = get_dict(plants_df)
+    # filter to get only for the 2 states we need and return dictionary values as list
+    state1_vector = list(states_plants.filter(lambda row: row[0] == state1).collect()[0][1].values())
+    state2_vector = list(states_plants.filter(lambda row: row[0] == state2).collect()[0][1].values())
+    # compute distance: sqrt(a^2 + b^2 + c^2)
+    res = 0
+    for i in range(0, len(state1_vector)):
+        res += (state1_vector[i] - state2_vector[i]) ** 2
+
+    return res
 
 def init_centroids(k, seed):
     '''
@@ -324,9 +345,19 @@ def init_centroids(k, seed):
     have issues in the next questions.
 
     Return value: a list of <k> states.
-    Test: tests/test_init_centroids.py
+    Test: tests/test_init_centroid.py
     '''
-    return []
+    all_states = ["ab", "ak", "ar", "az", "ca", "co", "ct", "de", "dc", "fl",
+                  "ga", "hi", "id", "il", "in", "ia", "ks", "ky", "la", "me", "md",
+                  "ma", "mi", "mn", "ms", "mo", "mt", "ne", "nv", "nh", "nj", "nm",
+                  "ny", "nc", "nd", "oh", "ok", "or", "pa", "pr", "ri", "sc", "sd",
+                  "tn", "tx", "ut", "vt", "va", "vi", "wa", "wv", "wi", "wy", "al",
+                  "bc", "mb", "nb", "lb", "nf", "nt", "ns", "nu", "on", "qc", "sk",
+                  "yt", "dengl", "fraspm"]
+
+    random.seed(seed)
+    init = random.sample(all_states, 3)
+    return init
 
 def first_iter(filename, k, seed):
     '''
@@ -341,7 +372,74 @@ def first_iter(filename, k, seed):
 
     Test: tests/test_first_iter.py
     '''
-    return {}
+
+    def closest_centroid(state, centroids):
+        '''
+        Helper function for first_iter(). Finds the closest centroid vector to 'state'.
+        - state: dictionary form of a state.
+        - centroids: the centroids from which to find the closest one. list of vectors.
+        '''
+
+        def distance(state_vector, centroid):
+            '''
+            Helper function for closest_centroid(): finds squared euclidian distance between two vectors.
+            '''
+            res = 0
+            for i in range(0, len(state_vector)):
+                res += (state_vector[i] - centroid[i]) ** 2
+            return res
+
+        '''
+        ------------------------------------------
+        start of closest_centroid
+        '''
+        # convert state to vector form
+        state_vector = list(state.values())
+
+        closest = None
+        min_dist = float('inf')
+        for centroid in centroids:
+            temp_dist = distance(state_vector, centroid)
+            if temp_dist < min_dist:
+                min_dist = temp_dist
+                closest = centroid
+        # return as tuple so it's hashable (used for reduceByKey)
+        return tuple(closest)
+
+    def get_state(vector, first_vectors):
+        '''
+        Helper function for first_iter(): Converts vector back into state string.
+        - returns the index for the state string.
+        '''
+        for i, centroid in enumerate(first_vectors):
+            if centroid == vector:
+                return i
+        return -50
+
+    '''
+    --------------------------------------------
+    start of first_iter()
+    '''
+    spark = init_spark()
+    random.seed(seed)
+    plants_df = spark.read.text(filename).na.drop()
+    states_plants = get_dict(plants_df)
+    # cache rdd
+    states_plants.persist()
+
+    # initialize centroids (states): states -> vectors
+    # filter rows where the state are centroids, then get their vector -> returns list of vectors [[1,0,1][0,0,1]etc]
+    first_centroids = sorted(init_centroids(k, seed))
+    first_vectors = states_plants.filter(lambda row: row[0] in first_centroids).sortByKey().map(
+        lambda row: list(row[1].values())).collect()
+
+    # list of ((1,0,0,1), 'fl') -> returns all states with their closest centroid vector
+    first = states_plants.map(lambda row: (closest_centroid(row[1], first_vectors), row[0]))
+    # -> list of 'k' ((1,0,1), 'fl, nc, kek') -> returns k centroids with their associated states as a string
+    first = first.reduceByKey(lambda x, y: x + ',' + y)
+    first = first.map(lambda row: [first_centroids[get_state(list(row[0]), first_vectors)], sorted(row[1].split(','))])
+
+    return dict(first.collect())
 
 def kmeans(filename, k, seed):
     '''
