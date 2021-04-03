@@ -372,7 +372,13 @@ def first_iter(filename, k, seed):
 
     Test: tests/test_first_iter.py
     '''
-
+    all_states = [ "ab", "ak", "ar", "az", "ca", "co", "ct", "de", "dc", "fl",
+        "ga", "hi", "id", "il", "in", "ia", "ks", "ky", "la", "me", "md",
+        "ma", "mi", "mn", "ms", "mo", "mt", "ne", "nv", "nh", "nj", "nm",
+        "ny", "nc", "nd", "oh", "ok", "or", "pa", "pr", "ri", "sc", "sd",
+        "tn", "tx", "ut", "vt", "va", "vi", "wa", "wv", "wi", "wy", "al",
+        "bc", "mb", "nb", "lb", "nf", "nt", "ns", "nu", "on", "qc", "sk",
+        "yt", "dengl", "fraspm" ]
     def closest_centroid(state, centroids):
         '''
         Helper function for first_iter(). Finds the closest centroid vector to 'state'.
@@ -433,8 +439,10 @@ def first_iter(filename, k, seed):
     first_vectors = states_plants.filter(lambda row: row[0] in first_centroids).sortByKey().map(
         lambda row: list(row[1].values())).collect()
 
+    # filter only the states asked
+    first = states_plants.filter(lambda row: row[0] in all_states)
     # list of ((1,0,0,1), 'fl') -> returns all states with their closest centroid vector
-    first = states_plants.map(lambda row: (closest_centroid(row[1], first_vectors), row[0]))
+    first = first.map(lambda row: (closest_centroid(row[1], first_vectors), row[0]))
     # -> list of 'k' ((1,0,1), 'fl, nc, kek') -> returns k centroids with their associated states as a string
     first = first.reduceByKey(lambda x, y: x + ',' + y)
     first = first.map(lambda row: [first_centroids[get_state(list(row[0]), first_vectors)], sorted(row[1].split(','))])
