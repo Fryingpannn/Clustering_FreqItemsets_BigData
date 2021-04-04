@@ -549,7 +549,7 @@ def kmeans(filename, k, seed):
         for pair in centroid_pairs.collect():
             acc_vector = pair[1][0]
             count = pair[1][1]
-            updated_centroid = list(map(lambda i: i // count, acc_vector))
+            updated_centroid = list(map(lambda i: i / count, acc_vector))
             centroids.append(updated_centroid)
 
         # end loop if converged
