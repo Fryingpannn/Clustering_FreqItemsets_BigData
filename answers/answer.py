@@ -532,11 +532,12 @@ def kmeans(filename, k, seed):
 
     # Initialization
     # -> returns list of vectors [[1,0,1][0,0,1]] representing the initial centroids
-    first_centroids = init_centroids(k, seed)
+    random.seed(seed)
+    first_centroids = random.sample(all_states, k)
     centroids = states_plants.filter(lambda row: row[0] in first_centroids).map(lambda row: row[1]).collect()
 
     # kmeans
-    # stop_at = 100
+    # stop_at = 3
     old_centroids = []
     while True:
         # -> returns: list of (index representing a closest centroid, (vector of the state, 1, string name of state))
