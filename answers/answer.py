@@ -356,7 +356,7 @@ def init_centroids(k, seed):
                   "yt", "dengl", "fraspm"]
 
     random.seed(seed)
-    init = random.sample(all_states, 3)
+    init = random.sample(all_states, k)
     return init
 
 def first_iter(filename, k, seed):
