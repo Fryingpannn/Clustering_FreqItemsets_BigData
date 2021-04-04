@@ -450,6 +450,54 @@ def first_iter(filename, k, seed):
     return dict(first.collect())
 
 
+def closest_centroid2(state_vector, centroids):
+    '''
+    Helper function for kmeans(). Finds the closest centroid vector to 'state'.
+    - state: dictionary form of a state.
+    - centroids: the centroids from which to find the closest one. list of vectors.
+    - returns: (centroid, state_vector): closest centroid vector of the state_vector
+    '''
+
+    def distance2(state_vector, centroid):
+        '''
+        Helper function for closest_centroid(): finds squared euclidian distance between two vectors.
+        '''
+        res = 0
+        for i in range(0, len(state_vector)):
+            res += (state_vector[i] - centroid[i]) ** 2
+        return res
+
+    '''
+    ------------------------------------------
+    start of closest_centroid
+    '''
+    closest = None
+    min_dist = float('inf')
+    for i, centroid in enumerate(centroids):
+        temp_dist = distance2(state_vector, centroid)
+        if temp_dist < min_dist:
+            min_dist = temp_dist
+            closest = i
+    # return index: only needed for reduceByKey. 'i' will be diferent for each centroids.
+    return closest
+
+
+def add_pairs(x, state_vector_tup):
+    '''
+    Both pairs' format: (state_vector, count, state_str)
+    '''
+    acc_vector = x[0]
+    total_count = x[1]
+    (state_vector, count, notusedstate_str) = state_vector_tup
+
+    new_vector = []
+    for i in range(len(acc_vector)):
+        new_vector.append(acc_vector[i] + state_vector[i])
+    total_count += count
+
+    return (new_vector, total_count)
+
+
 def kmeans(filename, k, seed):
     all_states = ["ab", "ak", "ar", "az", "ca", "co", "ct", "de", "dc", "fl",
                   "ga", "hi", "id", "il", "in", "ia", "ks", "ky", "la", "me", "md",
@@ -475,55 +523,6 @@ def kmeans(filename, k, seed):
                   and "ca".
     Test file: tests/test_kmeans.py
     '''
-
-    def closest_centroid(state_vector, centroids):
-        '''
-        Helper function for kmeans(). Finds the closest centroid vector to 'state'.
-        - state: dictionary form of a state.
-        - centroids: the centroids from which to find the closest one. list of vectors.
-        - returns: (centroid, state_vector): closest centroid vector of the state_vector
-        '''
-
-        def distance(state_vector, centroid):
-            '''
-            Helper function for closest_centroid(): finds squared euclidian distance between two vectors.
-            '''
-            res = 0
-            for i in range(0, len(state_vector)):
-                res += (state_vector[i] - centroid[i]) ** 2
-            return res
-
-        '''
-        ------------------------------------------
-        start of closest_centroid
-        '''
-        closest = None
-        min_dist = float('inf')
-        for i, centroid in enumerate(centroids):
-            temp_dist = distance(state_vector, centroid)
-            if temp_dist < min_dist:
-                min_dist = temp_dist
-                closest = i
-        # return index: only needed for reduceByKey. 'i' will be diferent for each centroids.
-        return closest
-
-    def add_pairs(x, state_vector_tup):
-        '''
-        Both pairs' format: (state_vector, count, state_str)
-        '''
-        acc_vector = x[0]
-        total_count = x[1]
-        (state_vector, count, notusedstate_str) = state_vector_tup
-
-        new_vector = []
-        for i in range(len(acc_vector)):
-            new_vector.append(acc_vector[i] + state_vector[i])
-        total_count += count
-
-        return (new_vector, total_count)
-    '''
-    start of kmeans --------------------------------------------------------------
-    '''
     spark = init_spark()
     plants_df = spark.read.text(filename).na.drop()
     # RDD of (name of the state, [vector rep of the state])
@@ -541,7 +540,7 @@ def kmeans(filename, k, seed):
     old_centroids = []
     while True:
         # -> returns: list of (index representing a closest centroid, (vector of the state, 1, string name of state))
-        closest = states_plants.map(lambda row: (closest_centroid(row[1], centroids), (row[1], 1, row[0])))
+        closest = states_plants.map(lambda row: (closest_centroid2(row[1], centroids), (row[1], 1, row[0])))
         # -> returns: list of k centroids and their accumulated vectors (centroid index, (accumulated vector, total_count))
         # (could return less than k if one or more centroid was not close to any item)
         centroid_pairs = closest.reduceByKey(lambda x, y: add_pairs(x, y))
