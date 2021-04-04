@@ -1,17 +1,22 @@
-import os
-import sys
-import copy
-import time
-import random
-import pyspark
-import math
-from statistics import mean
 from pyspark.rdd import RDD
 from pyspark.sql import Row
 from pyspark.sql import DataFrame
 from pyspark.sql import SparkSession
+from pyspark.sql.functions import lit
+from pyspark.sql.functions import desc
+from pyspark.ml.evaluation import RegressionEvaluator
+from pyspark.ml.recommendation import ALS
+from pyspark import SparkContext as sc
+from pyspark.sql import SparkSession
+from pyspark.sql import functions as F
 from pyspark.ml.fpm import FPGrowth
-from pyspark.sql.functions import desc, size, max, abs, col
+from pyspark.sql.functions import desc, size, max, abs, explode, col, expr
+import random
+import math
+import os
+import sys
+import time
+import copy
 
 '''
 INTRODUCTION
