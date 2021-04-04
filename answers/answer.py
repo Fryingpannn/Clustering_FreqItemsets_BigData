@@ -1,22 +1,17 @@
+import os
+import sys
+import copy
+import time
+import random
+import pyspark
+import math
+from statistics import mean
 from pyspark.rdd import RDD
 from pyspark.sql import Row
 from pyspark.sql import DataFrame
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import lit
-from pyspark.sql.functions import desc
-from pyspark.ml.evaluation import RegressionEvaluator
-from pyspark.ml.recommendation import ALS
-from pyspark import SparkContext as sc
-from pyspark.sql import SparkSession
-from pyspark.sql import functions as F
 from pyspark.ml.fpm import FPGrowth
-from pyspark.sql.functions import desc, size, max, abs, explode, col, expr
-import random
-import math
-import os
-import sys
-import time
-import copy
+from pyspark.sql.functions import desc, size, max, abs, col
 
 '''
 INTRODUCTION
@@ -532,7 +527,7 @@ def kmeans(filename, k, seed):
     plants_df = spark.read.text(filename).na.drop()
     # RDD of (name of the state, [vector rep of the state])
     states_plants = get_dict(plants_df).filter(lambda row: row[0] in all_states).map(
-        lambda row: (row[0], list(row[1].values())))
+        lambda row: (row[0], [float(i) for i in list(row[1].values())]))
     states_plants.persist()
 
     # Initialization
@@ -554,7 +549,7 @@ def kmeans(filename, k, seed):
         for pair in centroid_pairs.collect():
             acc_vector = pair[1][0]
             count = pair[1][1]
-            updated_centroid = list(map(lambda i: i / count, acc_vector))
+            updated_centroid = list(map(lambda i: i // count, acc_vector))
             centroids.append(updated_centroid)
 
         # end loop if converged
